@@ -289,8 +289,7 @@ def query_stamps(
 
         try:
             stamps = client.get_stamps(
-                **params,
-                include_variance_and_psf=include_variance_and_psf
+                **params, include_variance_and_psf=include_variance_and_psf
             )
             # print(stamps)
         except:
@@ -300,13 +299,16 @@ def query_stamps(
             continue
 
         obj = {col_id: oid, col_candid: candid}
-        # print(stamps)
 
-        planes = (
-            image_planes
-            if isinstance(stamps["cutout" + imtypes[0]], list)
-            else ["flux"]
-        )
+        if sid == 0:
+            stamps = {"cutout" + imtypes[x]: stamps[x] for x in np.arange(3)}
+            planes = ["flux"]
+        else:
+            planes = (
+                image_planes
+                if isinstance(stamps["cutout" + imtypes[0]], list)
+                else ["flux"]
+            )
 
         for j, plane in enumerate(planes):
             for imtype in imtypes:
@@ -438,8 +440,12 @@ def init_lc_kwargs():
 # TODO: add non_detections in plot
 # TODO: add low-S/N forced photometry epochs as upper limits in plot
 def plot_lc(
-    d_objs={}, mjd_lims=None, y_lims=None, lc_params={}, title_exts="",
-    namefig=None, use_1panel=False
+    d_objs={},
+    mjd_lims=None,
+    y_lims=None,
+    lc_params={},
+    title_exts="",
+    namefig=None,
 ):
     lc_params_default = {
         "from_tap": False,
@@ -492,6 +498,9 @@ def plot_lc(
     gs = GridSpec(nrows=nrows, ncols=1, figure=fig)
 
     i = 0
+    
+    mjd_min = 70000.0
+    mjd_max = 40000.0
 
     for sid in d_objs.keys():
         bands = sid_bands[sid]
@@ -543,16 +552,14 @@ def plot_lc(
                             y = df_dets[col_y][mask]
                             yerr = df_dets[col_yerr][mask]
                         else:
-                            if len(df_dets[mask][
-                                df_dets[col_y][mask].notna()
-                                ]) == 0:
+                            if len(df_dets[mask][df_dets[col_y][mask].notna()]) == 0:
                                 continue
                             y = fluxnjy2mag(df_dets[col_y][mask])
                             yerr = flux_err_2_mag_err(
                                 df_dets[col_yerr][mask], df_dets[col_y][mask].abs()
                             )
 
-                            if use_absmag and z_obj is not None:
+                            if use_absmag and ~np.isnan(z_obj):
                                 y = absmag(y, distmod=distmod)
 
                         if use_folded and period is not None:
@@ -602,13 +609,10 @@ def plot_lc(
                                 linestyle="None",
                             )
 
-                if mjd_lims is None and len(df_dets[df_dets[col_y].notna()]) == 1:
-                    ax_i.set_xlim(
-                        [
-                            df_dets.iloc[0][col_mjd] - offset_mjd,
-                            df_dets.iloc[0][col_mjd] + offset_mjd,
-                        ]
-                    )
+                if not use_folded:
+                    mjd_min = np.min([mjd_min, min(df_dets[col_mjd]) - offset_mjd])
+                    mjd_max = np.max([mjd_max, max(df_dets[col_mjd]) + offset_mjd])
+                    ax_i.set_xlim([mjd_min, mjd_max])
 
                 df_forced = d_objs[sid][oid]["forced_photometry"].copy()
                 use_forced = d_objs[sid][oid]["lc_kwargs"]["show_forced"]
@@ -622,9 +626,10 @@ def plot_lc(
                                 y = df_forced[col_y][mask]
                                 yerr = df_forced[col_yerr][mask]
                             else:
-                                if len(df_forced[mask][
-                                    df_forced[col_y][mask].notna()
-                                    ]) == 0:
+                                if (
+                                    len(df_forced[mask][df_forced[col_y][mask].notna()])
+                                    == 0
+                                ):
                                     continue
                                 y = fluxnjy2mag(df_forced[col_y][mask])
                                 yerr = flux_err_2_mag_err(
@@ -632,7 +637,7 @@ def plot_lc(
                                     df_forced[col_y][mask].abs(),
                                 )
 
-                                if use_absmag and z_obj is not None:
+                                if use_absmag and ~np.isnan(z_obj):
                                     y = absmag(y, distmod=distmod)
 
                             if use_folded and period is not None:
@@ -682,6 +687,15 @@ def plot_lc(
                                     linestyle="None",
                                 )
 
+                    if not use_folded:
+                        mjd_min = np.min(
+                            [mjd_min, min(df_forced[col_mjd]) - offset_mjd]
+                        )
+                        mjd_max = np.max(
+                            [mjd_max, max(df_forced[col_mjd]) + offset_mjd]
+                        )
+                        ax_i.set_xlim([mjd_min, mjd_max])
+
                 if use_folded and ~np.isnan(period):
                     ax_i.set_xlabel("Phase [days]")
                 else:
@@ -700,12 +714,12 @@ def plot_lc(
                     ax_i.set_title(title + title_aux + title_exts)
                 else:
                     if light_type == "diff":
-                        if use_absmag:
+                        if use_absmag and ~np.isnan(z_obj):
                             ax_i.set_ylabel("Absolute magnitude (from difference flux)")
                         else:
                             ax_i.set_ylabel("Difference magnitude")
                     elif light_type == "sci":
-                        if use_absmag:
+                        if use_absmag and ~np.isnan(z_obj):
                             ax_i.set_ylabel("Absolute magnitude")
                         else:
                             ax_i.set_ylabel("Apparent magnitude")
@@ -725,7 +739,7 @@ def plot_lc(
 
     if mjd_lims is not None:
         for j in fig.axes:
-            j.set_xlim([mjd_min, mjd_max])
+            j.set_xlim(mjd_lims)
     else:
         xlims = []
         for j in fig.axes:
@@ -775,8 +789,12 @@ def plot_lc(
 # TODO: add non_detections in plot
 # TODO: add low-S/N forced photometry epochs as upper limits in plot
 def plot_lc_1panel(
-    d_objs={}, mjd_lims=None, y_lims=None, lc_params={}, title_exts="",
-    namefig=None, use_1panel=False
+    d_objs={},
+    mjd_lims=None,
+    y_lims=None,
+    lc_params={},
+    title_exts="",
+    namefig=None,
 ):
     lc_params_default = {
         "from_tap": False,
@@ -826,7 +844,7 @@ def plot_lc_1panel(
                     show_diff = True
                 if d_objs[sid][oid]["lc_kwargs"]["show_sci"]:
                     show_sci = True
-    
+
     light_types = []
     if show_diff:
         nrows += 1
@@ -837,20 +855,26 @@ def plot_lc_1panel(
 
     fig = plt.figure(figsize=(figwidth, pheight * nrows))
     gs = GridSpec(nrows=nrows, ncols=1, figure=fig)
-    
-    #title = " + ".join([sid_survey[x] + " " + ", ".join(
+
+    # title = " + ".join([sid_survey[x] + " " + ", ".join(
     #    str(oid) for oid in d_objs[x].keys()
     #    ) for x in d_objs.keys()])
-    title = " + ".join([", ".join(
-        str(oid) for oid in d_objs[x].keys()
-        ) for x in d_objs.keys()])
+    title = " + ".join(
+        [", ".join(str(oid) for oid in d_objs[x].keys()) for x in d_objs.keys()]
+    )
 
+    mjd_min = 70000.0
+    mjd_max = 40000.0
+    
     for i, light_type in enumerate(light_types):
         ax_i = plt.subplot(gs[i])
-        
-        #title = " + ".join([sid_survey[x] for x in d_objs.keys()])
-        
+
+        # title = " + ".join([sid_survey[x] for x in d_objs.keys()])
+
         for sid in d_objs.keys():
+            if sid is None:
+                continue
+
             bands = sid_bands[sid]
             col_band = sid_map_cols[sid]["band"]
             col_mjd = sid_map_cols[sid]["mjd"]
@@ -858,11 +882,11 @@ def plot_lc_1panel(
             markers = lc_markers[sid]
             sizes = lc_sizes[sid]
             sizes_forced = lc_sizes_forced[sid]
-            
+
             tag = sid_survey[sid]
 
             for oid in d_objs[sid].keys():
-                #tag = sid_survey[sid] + " " + str(oid)
+                # tag = sid_survey[sid] + " " + str(oid)
 
                 df_dets = d_objs[sid][oid]["detections"].copy()
 
@@ -894,21 +918,20 @@ def plot_lc_1panel(
 
                 for band in bands:
                     mask = df_dets[col_band] == band
-                    if len(df_dets[mask]) > 0:
+
+                    if len(df_dets[mask]) > 0 and col_y in df_dets.columns:
                         if use_flux:
                             y = df_dets[col_y][mask]
                             yerr = df_dets[col_yerr][mask]
                         else:
-                            if len(df_dets[mask][
-                                df_dets[col_y][mask].notna()
-                                ]) == 0:
+                            if len(df_dets[mask][df_dets[col_y][mask].notna()]) == 0:
                                 continue
                             y = fluxnjy2mag(df_dets[col_y][mask])
                             yerr = flux_err_2_mag_err(
                                 df_dets[col_yerr][mask], df_dets[col_y][mask].abs()
                             )
 
-                            if use_absmag and z_obj is not None:
+                            if use_absmag and ~np.isnan(z_obj):
                                 y = absmag(y, distmod=distmod)
 
                         if use_folded and period is not None:
@@ -958,19 +981,16 @@ def plot_lc_1panel(
                                 linestyle="None",
                             )
 
-                if mjd_lims is None and len(df_dets[df_dets[col_y].notna()]) == 1:
-                    ax_i.set_xlim(
-                        [
-                            df_dets.iloc[0][col_mjd] - offset_mjd,
-                            df_dets.iloc[0][col_mjd] + offset_mjd,
-                        ]
-                    )
+                if not use_folded:
+                    mjd_min = np.min([mjd_min, min(df_dets[col_mjd]) - offset_mjd])
+                    mjd_max = np.max([mjd_max, max(df_dets[col_mjd]) + offset_mjd])
+                    ax_i.set_xlim([mjd_min, mjd_max])
 
                 df_forced = d_objs[sid][oid]["forced_photometry"].copy()
                 use_forced = d_objs[sid][oid]["lc_kwargs"]["show_forced"]
 
                 if len(df_forced) > 0 and use_forced:
-                    #display(df_forced)
+                    # display(df_forced)
                     for band in bands:
                         mask = df_forced[col_band] == band
                         if len(df_forced[mask]) > 0:
@@ -978,9 +998,10 @@ def plot_lc_1panel(
                                 y = df_forced[col_y][mask]
                                 yerr = df_forced[col_yerr][mask]
                             else:
-                                if len(df_forced[mask][
-                                    df_forced[col_y][mask].notna()
-                                    ]) == 0:
+                                if (
+                                    len(df_forced[mask][df_forced[col_y][mask].notna()])
+                                    == 0
+                                ):
                                     continue
                                 y = fluxnjy2mag(df_forced[col_y][mask])
                                 yerr = flux_err_2_mag_err(
@@ -988,7 +1009,7 @@ def plot_lc_1panel(
                                     df_forced[col_y][mask].abs(),
                                 )
 
-                                if use_absmag and z_obj is not None:
+                                if use_absmag and ~np.isnan(z_obj):
                                     y = absmag(y, distmod=distmod)
 
                             if use_folded and period is not None:
@@ -1038,6 +1059,15 @@ def plot_lc_1panel(
                                     linestyle="None",
                                 )
 
+                    if not use_folded:
+                        mjd_min = np.min(
+                            [mjd_min, min(df_forced[col_mjd]) - offset_mjd]
+                        )
+                        mjd_max = np.max(
+                            [mjd_max, max(df_forced[col_mjd]) + offset_mjd]
+                        )
+                        ax_i.set_xlim([mjd_min, mjd_max])
+
                 if use_folded and ~np.isnan(period):
                     ax_i.set_xlabel("Phase [days]")
                 else:
@@ -1054,15 +1084,14 @@ def plot_lc_1panel(
                         "title_exts_flux_" + light_type
                     ]
                     ax_i.set_title(title + title_aux + title_exts)
-                    #ax_i.set_title(title_aux.replace(", ", "").capitalize() + title_exts)
                 else:
                     if light_type == "diff":
-                        if use_absmag:
+                        if use_absmag and ~np.isnan(z_obj):
                             ax_i.set_ylabel("Absolute magnitude (from difference flux)")
                         else:
                             ax_i.set_ylabel("Difference magnitude")
                     elif light_type == "sci":
-                        if use_absmag:
+                        if use_absmag and ~np.isnan(z_obj):
                             ax_i.set_ylabel("Absolute magnitude")
                         else:
                             ax_i.set_ylabel("Apparent magnitude")
@@ -1080,7 +1109,7 @@ def plot_lc_1panel(
 
     if mjd_lims is not None:
         for j in fig.axes:
-            j.set_xlim([mjd_min, mjd_max])
+            j.set_xlim(mjd_lims)
     else:
         xlims = []
         for j in fig.axes:
